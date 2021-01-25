@@ -6,8 +6,9 @@ int phares[] = {12, 8, 1, 0};
 int ledStop = 13;
 int ledStopOutput = 0;
 // moteurs - idx: Left = 0 | Right = 1 | Avance = 2
-int pinMoteurs[2] = {10, 11};
-int valueMoteurs[3] = {0, 0, 0}; // HIGH = 1 | LOW = 0
+int pinMoteurs[2] = {11, 10};
+int valueMoteurs[3] = {0,0,0}; // HIGH = 1 | LOW = 0
+float moteursWeights[2] = {1, 0.9};
 // cligno - idx: Left = 0 | Right = 1
 int ledCligno[2] = {2, 9};
 int valueCligno[2] = {0, 0}; // HIGH = 1 | LOW = 0
@@ -35,20 +36,35 @@ void loop() {
   int valeurSensor = analogRead(phareSensor);
   lightPhares(valeurSensor);
   // from Serial
-  parse_data();
-  // stop
-  if (valueMoteurs[0] == 0 && valueMoteurs[1] == 0 && valueMoteurs[2] == 0){
+  if (Serial.available() > 0) {
+    parse_data();
+  }
+  // stop - only write when new information (avoid overflow of information)
+  if (valueMoteurs[0] == 0 && valueMoteurs[1] == 0 && ledStopOutput == 0){
     ledStopOutput = !ledStopOutput;
     digitalWrite(ledStop, ledStopOutput); 
-  } else if (ledStopOutput == 1) { // turn off lights otherwise
+  } else if (ledStopOutput == 1 && !(valueMoteurs[0] == 0 && valueMoteurs[1] == 0)) { // turn off lights otherwise
     ledStopOutput = !ledStopOutput;
     digitalWrite(ledStop, ledStopOutput); 
   }
   // cligno
-  if (valueMoteurs[0] > 0 && valueMoteurs[2] == 0){
-    cligno(0);
-  } else if (valueMoteurs[1] > 0 && valueMoteurs[2] == 0){
-    cligno(1);
+  //Serial.println(millis() - clignoCompare);
+  if (valueMoteurs[0] > 0 && valueMoteurs[1] == 0){
+    if (millis() - clignoCompare >= delayCligno) {
+      cligno(0);
+      clignoCompare = millis();
+    }
+    if (valueCligno[1] == 1) {
+      cligno(1); // turn off in case still on
+    }
+  } else if (valueMoteurs[1] > 0 && valueMoteurs[0] == 0){
+    if (millis() - clignoCompare >= delayCligno) {
+      cligno(1);
+      clignoCompare = millis();
+    }
+    if (valueCligno[0] == 1) {
+      cligno(0); // turn off in case still on
+    }
   } else { // turn off cligno otherwise
     if (valueCligno[0] == 1){
       cligno(0);
@@ -57,17 +73,14 @@ void loop() {
     }
   }
   // moteur
-  // controlMotor(1, 0.9);
+  controlMotor(valueMoteurs);
 }
 
 
 // --------------------------- LED ---------------------------
 void cligno(int lrCligno) {
-      if (millis() - clignoCompare >= delayCligno) {
-        digitalWrite(ledCligno[lrCligno], valueCligno[lrCligno]);
-        valueCligno[lrCligno] = !valueCligno[lrCligno];
-        clignoCompare = millis();
-      }
+  valueCligno[lrCligno] = !valueCligno[lrCligno];
+  digitalWrite(ledCligno[lrCligno], valueCligno[lrCligno]);
 }
 
 void lightPhares(int valeurSensor){
@@ -86,12 +99,11 @@ void lightPhares(int valeurSensor){
 }
 
 // ------------------------- MOTEURS ------------------------
-void controlMotor(float spdD, float spdG) {
-  int motD = spdD*255;
-  int motG = spdG*255;
-  analogWrite(10, motD);
-  analogWrite(11, motG);
-  Serial.println(motD);
+void controlMotor(int val[3]) { 
+  // moteurs - idx: Left = 0 | Right = 1 | Avance = 2
+  for (int i = 0; i < 2; i++){
+    analogWrite(pinMoteurs[i], moteursWeights[i]*125*val[i]); // motor imbalance
+  }
 }
 
 
@@ -105,4 +117,6 @@ void parse_data(){
   //valueMoteurs[2] = Serial.readStringUntil('\n').toInt();
   Serial.read(); // removing next character '\n'
   valueMoteurs[2] = (valueMoteurs[0] == valueMoteurs[1]);
+  Serial.print(valueMoteurs[0]);
+  Serial.println(valueMoteurs[1]);
 }
