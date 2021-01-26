@@ -1,3 +1,7 @@
+"""
+>>> python lsl_to_serial.py -sp '/dev/cu.usbmodem146101' -thr 200 200 -td 500 -sd 200
+"""
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -21,6 +25,8 @@ def argparser():
     argparser.add_argument('--lefteye', '-l', type=int, default=0, help="Electrode for left eye.")
     argparser.add_argument('--righteye', '-r', type=int, default=1, help="Electrode for right eye.")
     argparser.add_argument('--threshold', '-thr', type=int, nargs=2, default=[200,200], help="Threshold for each eye.")
+    argparser.add_argument('--turndelay', '-td', type=int, default=500, help="Duration of turn.")
+    argparser.add_argument('--stopdelay', '-sd', type=int, default=200, help="Duration of turn.")
     
     args = argparser.parse_args()
     return args
@@ -39,6 +45,40 @@ def filter_emg(s:list, fs:int = 250, cut_bounds:tuple = (7,13)):
 
     return cs
     
+def adapt_emg(left_blink:bool, right_blink:bool, prev_posting, prev_time, turn_delay:int, stop_delay:int):
+    #### Initial value
+    if left_blink and right_blink:
+        posting = b'0,0\n'
+    elif left_blink:
+        posting = b'1,0\n'
+    elif right_blink:
+        posting = b'0,1\n'
+    else:
+        posting = b'1,1\n'
+
+    #### Adapt with duration / prev value
+    # If turning, do not stop until timer end
+    if (prev_posting in [b'1,0\n', b'0,1\n']) and (posting == b'1,1\n'):
+        if time.time() - prev_time <= turn_delay: 
+            posting = prev_posting # if should go forward but still too close from turn, keep turn
+
+    # If turning, adapt if detect a blink in the other eye before the end of timing
+    elif prev_posting in [b'1,0\n', b'0,1\n'] and (posting in [b'1,0\n', b'0,1\n'] and prev_posting != posting):
+        if (time.time() - prev_time <= stop_delay): 
+            posting = b'0,0\n' # short delay between both eyes but stop
+    
+    # If restarting from stop, start with going forward
+    if (prev_posting == b'0,0\n'):
+        if (posting == b'1,1\n'):
+            posting = b'0,0\n' # need movement in eyes to restart
+        elif (time.time() - prev_time > stop_delay):
+            if posting == b'0,0\n':
+                posting = b'1,1\n'git 
+            #else: # only blinks since '1,1' condition is dealt with before 
+        else: # timer not reached
+            posting = b'0,0\n'
+
+    return posting
 
 
 if __name__ == '__main__':
@@ -56,6 +96,7 @@ if __name__ == '__main__':
     # Check new data
     # moves = [b'1,1\n', b'0,0\n', b'0,1\n', b'1,0\n']
     posting = b'0,0\n'
+    start_turn = None
     while True:
         prev_posting = posting
         sample, _ = fft.pull_sample()
@@ -65,19 +106,12 @@ if __name__ == '__main__':
         if len(fft_data) < args.nbsamples:
             posting = b'1,1\n'
         else:
-            #print(filter_emg(an_data[args.lefteye]))
             left_blink = (max(filter_emg(an_data[:,args.lefteye])) > args.threshold[0])
             right_blink = (max(filter_emg(an_data[:,args.righteye])) > args.threshold[1])
-            if left_blink and right_blink:
-                posting = b'0,0\n'
-            elif left_blink:
-                posting = b'1,0\n'
-            elif right_blink:
-                posting = b'0,1\n'
-            else:
-                posting = b'1,1\n'
         
+        posting = adapt_emg(left_blink, right_blink, prev_posting, start_turn, args.turndelay, args.stopdelay)   
         if prev_posting != posting:
+            start_turn = time.time()
             ser.write(posting)  
             print(f"Command: {posting}")
     
