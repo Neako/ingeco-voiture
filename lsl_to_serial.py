@@ -55,16 +55,19 @@ if __name__ == '__main__':
 
     # Check new data
     # moves = [b'1,1\n', b'0,0\n', b'0,1\n', b'1,0\n']
+    posting = b'0,0\n'
     while True:
+        prev_posting = posting
         sample, _ = fft.pull_sample()
         fft_data.append(sample)
         an_data = np.array(fft_data)
 
-        if len(fft_data < args.nbsamples):
+        if len(fft_data) < args.nbsamples:
             posting = b'1,1\n'
         else:
-            left_blink = (max(filter_emg(an_data[args.left])) > args.threshold[0])
-            right_blink = (max(filter_emg(an_data[args.right])) > args.threshold[1])
+            #print(filter_emg(an_data[args.lefteye]))
+            left_blink = (max(filter_emg(an_data[:,args.lefteye])) > args.threshold[0])
+            right_blink = (max(filter_emg(an_data[:,args.righteye])) > args.threshold[1])
             if left_blink and right_blink:
                 posting = b'0,0\n'
             elif left_blink:
@@ -74,9 +77,9 @@ if __name__ == '__main__':
             else:
                 posting = b'1,1\n'
         
-        ser.write(posting)  
-        print(f"Command: {posting}")
-        time.sleep(5)
+        if prev_posting != posting:
+            ser.write(posting)  
+            print(f"Command: {posting}")
     
     # Close Serial stream
     ser.close()   
